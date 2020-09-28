@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.authentication import BasicAuthentication, SessionAuthentication
-from rest_framework import permissions, exceptions
+from rest_framework import permissions, exceptions, HTTP_HEADER_ENCODING
 from django.utils.translation import gettext as _
 from rest_framework.status import (
     HTTP_400_BAD_REQUEST,
@@ -16,6 +16,8 @@ from django.core import serializers
 from movie_api.serializers import *
 from movie_api.models import *
 import json, re
+import base64
+import binascii
 
 class CreateUserAPI(CreateAPIView):
     model = get_user_model()
@@ -24,33 +26,52 @@ class CreateUserAPI(CreateAPIView):
     ]
     serializer_class = UserSerializer
 
-# class CustomAuthentication(BasicAuthentication):
+def get_authorization_header(request):
+    """
+    Return request's 'Authorization:' header, as a bytestring.
+    Hide some test client ickyness where the header can be unicode.
+    """
+    auth = request.META.get('HTTP_AUTHORIZATION', b'')
+    if isinstance(auth, str):
+        # Work around django test client oddness
+        auth = auth.encode(HTTP_HEADER_ENCODING)
+    return auth
 
-#     def authenticate(self, request):
-#         # Get the username and password
-#         print(request.headers)
-#         username = request.headers.get('username', None)
-#         password = request.headers.get('password', None)
+class CustomAuthentication(BasicAuthentication):
+   
+    # HTTP Basic authentication against username/password.
+   
+    www_authenticate_realm = 'api'
 
+    def authenticate(self, request):
+       
+        # Returns a `User` if a correct username and password have been supplied
+        # using HTTP Basic authentication.  Otherwise returns `None`.
+    
+        auth = get_authorization_header(request).split()
 
-#         if not username or not password:
-#             raise exceptions.AuthenticationFailed(_('No credentials provided.'))
+        if not auth or auth[0].lower() != b'basic':
+            return None
 
-#         credentials = {
-#             get_user_model().USERNAME_FIELD: username,
-#             'password': password
-#         }
+        if len(auth) == 1:
+            msg = _('Invalid basic header. No credentials provided.')
+            raise exceptions.AuthenticationFailed(msg)
+        elif len(auth) > 2:
+            msg = _('Invalid basic header. Credentials string should not contain spaces.')
+            raise exceptions.AuthenticationFailed(msg)
 
-#         user = authenticate(**credentials)
+        try:
+            try:
+                auth_decoded = base64.b64decode(auth[1]).decode('utf-8')
+            except UnicodeDecodeError:
+                auth_decoded = base64.b64decode(auth[1]).decode('latin-1')
+            auth_parts = auth_decoded.partition(':')
+        except (TypeError, UnicodeDecodeError, binascii.Error):
+            msg = _('Invalid basic header. Credentials not correctly base64 encoded.')
+            raise exceptions.AuthenticationFailed(msg)
 
-#         if user is None:
-#             raise exceptions.AuthenticationFailed(_('Incorrect username/password.'))
-
-#         if not user.is_active:
-#             raise exceptions.AuthenticationFailed(_('User inactive or deleted.'))
-
-
-#         return (user, None)  # authentication successful
+        userid, password = auth_parts[0], auth_parts[2]
+        return self.authenticate_credentials(userid, password, request)
 
 
 class ViewMoviePermission(permissions.BasePermission):
@@ -69,8 +90,8 @@ class AdminMoviePermission(permissions.BasePermission):
 
 # View for Getting Movies in List or With id
 class ListAPI(APIView):
-    # authentication_classes = (CustomAuthentication, )
-    authentication_classes = (SessionAuthentication, BasicAuthentication, )
+    authentication_classes = (CustomAuthentication, )
+    # authentication_classes = (SessionAuthentication, BasicAuthentication, )
     permission_classes = (IsAuthenticated, ViewMoviePermission )
 
     def get(self, request, *args, **kwargs):
@@ -107,8 +128,8 @@ class ListAPI(APIView):
 
 # View for search in movie dataset
 class SearchAPI(APIView):
-    # authentication_classes = (CustomAuthentication, )
-    authentication_classes = (SessionAuthentication, BasicAuthentication, )
+    authentication_classes = (CustomAuthentication, )
+    # authentication_classes = (SessionAuthentication, BasicAuthentication, )
     permission_classes = (IsAuthenticated, ViewMoviePermission )
     
     def get(self, request, *args, **kwargs):
@@ -131,8 +152,8 @@ class SearchAPI(APIView):
 
 # View for Update in Movie Dataset, Only for Admin
 class UpdateAPI(APIView):
-    # authentication_classes = (CustomAuthentication, )
-    authentication_classes = (SessionAuthentication, BasicAuthentication, )
+    authentication_classes = (CustomAuthentication, )
+    # authentication_classes = (SessionAuthentication, BasicAuthentication, )
     permission_classes = (IsAuthenticated, AdminMoviePermission )  # Only for Admin
 
     def validate(self, movie_object):
@@ -186,8 +207,8 @@ class UpdateAPI(APIView):
 
 # View for Add in Movie Dataset, Only for Admin
 class CreateAPI(APIView):
-    # authentication_classes = (CustomAuthentication, )
-    authentication_classes = (SessionAuthentication, BasicAuthentication, )
+    authentication_classes = (CustomAuthentication, )
+    # authentication_classes = (SessionAuthentication, BasicAuthentication, )
     permission_classes = (IsAuthenticated, AdminMoviePermission )  # Only for Admin
 
 
@@ -245,8 +266,8 @@ class CreateAPI(APIView):
 
 # View for Update in Movie Dataset, Only for Admin
 class RemoveAPI(APIView):
-    # authentication_classes = (CustomAuthentication, )
-    authentication_classes = (SessionAuthentication, BasicAuthentication, )
+    authentication_classes = (CustomAuthentication, )
+    # authentication_classes = (SessionAuthentication, BasicAuthentication, )
     permission_classes = (IsAuthenticated, AdminMoviePermission ) # Only for Admin
 
 
