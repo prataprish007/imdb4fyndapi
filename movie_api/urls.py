@@ -6,7 +6,7 @@ app_name = "movie_api"
 
 urlpatterns = [
     url(r"^getmovies/v1/$", ListAPI.as_view(), name="getmovies"),
-    url(r"^getmovies/v1/(?P<id>[-\d]+)/$", ListAPI.as_view(), name="getmovies"),
+    url(r"^getmovies/v1/(?P<id>[-\w]+)/$", ListAPI.as_view(), name="getmovies"),
 
     url(r"^searchmovies/v1/(?P<search_keyword>[-\w]+)/$", SearchAPI.as_view(), name="searchmovies"),
     url(r"^updatemovies/v1/(?P<id>[-\d]+)/$", UpdateAPI.as_view(), name="updatemovies"),
