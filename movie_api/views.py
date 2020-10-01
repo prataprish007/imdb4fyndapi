@@ -13,6 +13,7 @@ from rest_framework.status import (
 from rest_framework.generics import CreateAPIView
 from django.contrib.auth import authenticate, get_user_model
 from django.core import serializers
+from django.db.models import Q
 from movie_api.serializers import *
 from movie_api.models import *
 import json, re
@@ -93,33 +94,45 @@ class ListAPI(APIView):
     authentication_classes = (CustomAuthentication, )
     # authentication_classes = (SessionAuthentication, BasicAuthentication, )
     permission_classes = (IsAuthenticated, ViewMoviePermission )
+    # serializer_class = MovieListSerializer
+
+    def get(self, request, *args, **kwargs):
+        try:
+            movie_queryset = Movie.objects.all().order_by('-search_count')[:50]
+            serializer = MovieListSerializer(movie_queryset, many=True)
+            return Response(serializer.data, status=HTTP_200_OK)
+            
+        except Exception as e:
+            result = {
+                "Error": "Something Went Wrong!! {}".format(e)
+            }
+            return Response(result, status=HTTP_500_INTERNAL_SERVER_ERROR)
+
+class GetMovieAPI(APIView):
+    authentication_classes = (CustomAuthentication, )
+    # authentication_classes = (SessionAuthentication, BasicAuthentication, )
+    permission_classes = (IsAuthenticated, ViewMoviePermission )
+    # serializer_class = MovieListSerializer
 
     def get(self, request, *args, **kwargs):
         try:
             if "id" in self.kwargs:
-                if self.kwargs['id'].isdigit():
-                    id = self.kwargs['id']
-                else:
-                    return Response("To get movie by ID. ID should be a number", status=HTTP_200_OK)
+                id = self.kwargs['id']
             else:
-                id = None
-
-            if id is not None:
-                movie_queryset = Movie.objects.filter(id=id).values_list('id', '_99popularity', 'name', 'genre', 'director', 'imdb_score')
-            else:
-                movie_queryset = Movie.objects.all().values_list('id', '_99popularity', 'name', 'genre', 'director', 'imdb_score')
-
-            if movie_queryset.count() != 0:
-                filtered_set = list(movie_queryset.values('id', '_99popularity', 'name', 'genre', 'director', 'imdb_score'))
-                movie_list = json.loads(json.dumps(filtered_set))
-            else:
-                if id is not None:
-                    return Response("Movie with ID: "+id+" Not Found", status=HTTP_404_NOT_FOUND)
-                else:
-                    return Response("Movies Not Found", status=HTTP_404_NOT_FOUND)
-
-            return Response(movie_list, status=HTTP_200_OK)
-
+                return Response("Please provide Movie ID in URL.", status=HTTP_400_BAD_REQUEST)
+            
+            try:
+                movie_obj = Movie.objects.get(pk=id)
+                search_count = movie_obj.search_count + 1 
+                movie_obj.search_count = search_count
+                movie_obj.save()
+            except Exception as e:
+                print("exception : {}".format(e))
+                return Response("Movie with matching ID does not exist.", status=HTTP_404_NOT_FOUND)
+            serializer = GetMovieSerializer(movie_obj)
+            return Response(serializer.data, status=HTTP_200_OK)
+            
+            
         except Exception as e:
             result = {
                 "Error": "Something Went Wrong!! {}".format(e)
@@ -134,16 +147,17 @@ class SearchAPI(APIView):
     
     def get(self, request, *args, **kwargs):
         try:
-            search_keyword = self.kwargs['search_keyword']
-            movie_queryset = Movie.objects.filter(search_string__contains=search_keyword).values_list('id', '_99popularity', 'name', 'genre', 'director', 'imdb_score')
-            # movie_json = serializers.serialize('json', movie_queryset)
-            # movie_list = json.loads(movie_json)
-            if movie_queryset.count() != 0:
-                filtered_set = list(movie_queryset.values('id', '_99popularity', 'name', 'genre', 'director', 'imdb_score'))
-                movie_list = json.loads(json.dumps(filtered_set))
-                return Response(movie_list, status=HTTP_200_OK)
-            else:
-                return Response("No Search Results", status=HTTP_200_OK)
+            if "search_keyword" in self.kwargs:
+                search_keyword = self.kwargs['search_keyword']
+                lookups= Q(name__icontains=search_keyword) | Q(director__icontains=search_keyword) | Q(genre__name__icontains=search_keyword)
+                movie_queryset= Movie.objects.filter(lookups).distinct().order_by('-search_count')[:30]
+
+                if movie_queryset.count() != 0:
+                    serializer = MovieSearchSerializer(movie_queryset, many=True)
+                    return Response(serializer.data, status=HTTP_200_OK)
+                else:
+                    return Response("No Search Results", status=HTTP_200_OK)
+
         except Exception as e:
             result = {
                 "Error": "Something Went Wrong!! {}".format(e)
@@ -156,48 +170,30 @@ class UpdateAPI(APIView):
     # authentication_classes = (SessionAuthentication, BasicAuthentication, )
     permission_classes = (IsAuthenticated, AdminMoviePermission )  # Only for Admin
 
-    def validate(self, movie_object):
-        result = {
-            'status': True,
-            'message': ''
-        }
-        if '99popularity' not in movie_object or 'director' not in movie_object or 'genre' not in movie_object or 'imdb_score' not in movie_object or 'name' not in movie_object:
-            result['status']=False
-            result['message']='Parameter Missing!!'
-            return result
-        elif type(movie_object['imdb_score']) == str or movie_object['imdb_score'] > 10  or movie_object['imdb_score'] < 0:
-            result['status']=False
-            result['message']='IMDB Score not valid, should be a number between 0-10 !!'
-            return result
-        elif type(movie_object['99popularity']) == str or movie_object['99popularity'] > 100  or movie_object['99popularity'] < 0:
-            result['status']=False
-            result['message']='99popularity Score not valid, should be a number between 0-100 !!'
-            return result
-        elif type(movie_object['genre']) != list :
-            result['status']=False
-            result['message']='Genre should be a List or Array !!'
-            return result
-        else:
-            return result
-
     def put(self, request, *args, **kwargs):
         try:
-            id  = self.kwargs['id']
-            Movie_obj = json.loads(json.dumps(request.data))
-            print(Movie_obj)
+            if "id" in self.kwargs:
+                id = self.kwargs["id"]
+                try:
+                    movie = Movie.objects.get(pk=id)
+                except Exception as e:
+                    print("ex: {}".format(e))
+                    return Response("Given ID does not exist.", status=HTTP_404_NOT_FOUND)
 
-            validate_flag = self.validate(Movie_obj)
-            print(validate_flag)
-
-            if validate_flag['status']:
-                movie = Movie.objects.filter(pk=id)
-                if movie.count() != 0:
-                    movie.update(_99popularity=Movie_obj['99popularity'], name=Movie_obj['name'], genre=','.join(Movie_obj['genre']), director=Movie_obj['director'], imdb_score=Movie_obj['imdb_score'])
-                    return Response("Movie with id: "+ id +" updated successfully.", status=HTTP_200_OK)
-                else:
-                    return Response("Movie with ID: "+id+" doesn't exist", status=HTTP_400_BAD_REQUEST)
-            else:
-                return Response(validate_flag['message'], status=HTTP_400_BAD_REQUEST)
+                serializer = MovieSerializer(movie, data=request.data)
+                try:
+                    serializer.is_valid(raise_exception=True)
+                except Exception as e:
+                    return Response(serializer.errors, status=HTTP_400_BAD_REQUEST)
+                movie = serializer.save()
+                for gen in movie.genre.all():
+                    movie.genre.remove(gen)
+                for g in  request.data["genre"]:
+                    genre_obj, created = Genre.objects.get_or_create(name=g)
+                    movie.genre.add(genre_obj)
+                print("updated", movie.id)
+                return Response(serializer.data, status=HTTP_200_OK)
+               
 
         except Exception as e:
             result = {
@@ -205,59 +201,31 @@ class UpdateAPI(APIView):
             }
             return Response(result, status=HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 # View for Add in Movie Dataset, Only for Admin
 class CreateAPI(APIView):
     authentication_classes = (CustomAuthentication, )
     # authentication_classes = (SessionAuthentication, BasicAuthentication, )
     permission_classes = (IsAuthenticated, AdminMoviePermission )  # Only for Admin
 
-
-    def validate(self, movie_object):
-        result = {
-            'status': True,
-            'message': ''
-        }
-        if '99popularity' not in movie_object or 'director' not in movie_object or 'genre' not in movie_object or 'imdb_score' not in movie_object or 'name' not in movie_object:
-            result['status']=False
-            result['message']='Parameter Missing!!'
-            return result
-        elif type(movie_object['imdb_score']) == str or movie_object['imdb_score'] > 10  or movie_object['imdb_score'] < 0:
-            result['status']=False
-            result['message']='IMDB Score not valid, should be a number between 0-10 !!'
-            return result
-        elif type(movie_object['99popularity']) == str or movie_object['99popularity'] > 100  or movie_object['99popularity'] < 0:
-            result['status']=False
-            result['message']='99popularity Score not valid, should be a number between 0-100 !!'
-            return result
-        elif type(movie_object['genre']) != list :
-            result['status']=False
-            result['message']='Genre should be a List or Array !!'
-            return result
-        else:
-            return result
-
     def post(self, request, *args, **kwargs):
         try:
-            Movie_obj = json.loads(json.dumps(request.data))
-            print(Movie_obj)
-
-            validate_flag = self.validate(Movie_obj)
-            print(validate_flag)
-
-            if validate_flag['status']:
-                movie = Movie.objects.filter(_99popularity=Movie_obj['99popularity'], name=Movie_obj['name'], genre=','.join(Movie_obj['genre']), director=Movie_obj['director'], imdb_score=Movie_obj['imdb_score'])
-                if movie.count() > 0:
-                    return Response("Movie already exists with same parameters.", status=HTTP_400_BAD_REQUEST)
-                else:
-                    search_string = str(Movie_obj['99popularity']) + ' '+ Movie_obj['director']+ ' ' + str(Movie_obj['imdb_score'])+ ' '  + Movie_obj['name']+ ' ' + ' '.join(Movie_obj['genre'])
-                    movie = Movie(_99popularity=Movie_obj['99popularity'], name=Movie_obj['name'], genre=','.join(Movie_obj['genre']), director=Movie_obj['director'], imdb_score=Movie_obj['imdb_score'], search_string=search_string, search_count=0)
-                    movie.save()
-                    id = str(movie.id)
-                    return Response("Movie Successfully Added with id: "+id, status=HTTP_200_OK)
-            else:
-                return Response(validate_flag['message'], status=HTTP_400_BAD_REQUEST)
-
+            serializer = MovieSerializer(data=request.data)
+            try:
+                serializer.is_valid(raise_exception=True)
+            except Exception as e:
+                return Response(serializer.errors, status=HTTP_400_BAD_REQUEST)
+            movie = serializer.save()
+            for g in request.data.get('genre'):
+                genre_obj, created = Genre.objects.get_or_create(name=g)
+                movie.genre.add(genre_obj)
+            print("saved", movie.id)
+            return Response(serializer.data, status=HTTP_200_OK)
+           
         except Exception as e:
+            if "UNIQUE" in "{}".format(e):
+                return Response("Director Name and Movie Name should be UNIQUE together.", status=HTTP_400_BAD_REQUEST)
+            
             result = {
                 "Error": "Something Went Wrong!! {}".format(e)
             }
@@ -273,8 +241,8 @@ class RemoveAPI(APIView):
 
     def delete(self, request, *args, **kwargs):
         try:
-            id = self.kwargs['id']
-            if id is not None:
+            if "id" in self.kwargs:
+                id = self.kwargs['id']
                 movie = Movie.objects.filter(id=id)
                 movie.delete()
                 return Response("Movie Successfully deleted with id: "+id, status=HTTP_200_OK)
