@@ -157,7 +157,7 @@ class SearchAPI(APIView):
                     return Response(serializer.data, status=HTTP_200_OK)
                 else:
                     return Response("No Search Results", status=HTTP_200_OK)
-                    
+
         except Exception as e:
             result = {
                 "Error": "Something Went Wrong!! {}".format(e)
@@ -223,6 +223,9 @@ class CreateAPI(APIView):
             return Response(serializer.data, status=HTTP_200_OK)
            
         except Exception as e:
+            if "UNIQUE" in "{}".format(e):
+                return Response("Director Name and Movie Name should be UNIQUE together.", status=HTTP_400_BAD_REQUEST)
+            
             result = {
                 "Error": "Something Went Wrong!! {}".format(e)
             }

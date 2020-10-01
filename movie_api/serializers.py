@@ -107,6 +107,7 @@ class MovieSerializer(serializers.BaseSerializer):
     def to_representation(self, instance):
         print("inside to represent",[x.name for x in instance.genre.all()])
         return {
+            "id": instance.id,
             "_99popularity":instance._99popularity,
             "genre":[x.name for x in instance.genre.all()],
             "imdb_score":instance.imdb_score,
